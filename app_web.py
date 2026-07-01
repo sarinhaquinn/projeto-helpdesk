@@ -14,7 +14,8 @@ def criar_tabela():
         CREATE TABLE IF NOT EXISTS chamados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             titulo TEXT,
-            descricao TEXT
+            descricao TEXT, 
+            status TEXT DEFAULT 'Aberto'
         )
     """)
 
@@ -32,9 +33,9 @@ def criar_tabela():
     conexao.commit()
     conexao.close()
 
-criar_tabela() # Ativa o banco assim que o site abre
+criar_tabela() 
 
-# Inicializa as variáveis de sessão
+
 if "logado" not in st.session_state:
     st.session_state.logado = False
     st.session_state.usuario_atual = None
@@ -81,7 +82,7 @@ if not st.session_state.logado:
             st.session_state.logado = True
             st.session_state.usuario_atual = campo_usuario
             st.session_state.perfil_atual = resultado[0]
-            st.rerun()  # Adicionado os parênteses ()
+            st.rerun()  
         else: 
             st.error("❌ Usuário ou senha incorretos!")
 
@@ -91,7 +92,7 @@ else:
     col1, col2 = st.columns([4, 1])
     with col1:
         st.write(f"Olá, **{st.session_state.usuario_atual}** ({st.session_state.perfil_atual.upper()})")
-        #st.write(f"DEBUG: O seu perfil salvo é {st.session_state.perfil_atual}")
+        
     with col2:
         if st.button("Sair 🚪"):
             st.session_state.logado = False
@@ -99,54 +100,90 @@ else:
             st.session_state.perfil_atual = None
             st.rerun()
 
+        
     if "usuario" in st.session_state.perfil_atual.lower():
-        # Se for usuário comum, ele só ganha a aba de cadastro
+        
         aba_cadastro, = st.tabs(["📝 Novo Chamado"])
         aba_listagem = None
     else:
-        # Se não for usuário comum (ou seja, for técnico), ganha as duas abas
-        aba_cadastro, aba_listagem = st.tabs(["📝 Novo Chamado", "📋 Visualizar Chamados"])
-
-    
-
-    
-    with aba_cadastro:
-        st.subheader("Registrar uma nova ocorrência")
-
-        titulo_chamado = st.text_input("Título do Problema")
-        descricao_chamado = st.text_area("Descrição detalhada")
         
-        if st.button("Salvar Chamado", type="primary"):
+        aba_listagem, = st.tabs(["📋 Visualizar Chamados"])
+        aba_cadastro = None
+
+   
+    if aba_cadastro:
+        with aba_cadastro:
+            st.subheader("Registrar uma nova ocorrência")
             
-            if titulo_chamado.strip() == "" or descricao_chamado.strip() == "":
-                st.warning("⚠️ Por favor, preencha todos os campos!")
-            else:
-                conexao = sqlite3.connect("chamados.db")
-                cursor = conexao.cursor()
-                
-                cursor.execute(
-                    "INSERT INTO chamados (titulo, descricao) VALUES (?, ?)",
-                    (titulo_chamado, descricao_chamado)
-                )
-                
-                conexao.commit() 
-                conexao.close()  
-                
-                st.success("✅ Chamado registrado com sucesso!")
-        
+            titulo_chamado = st.text_input("Título do Problema", placeholder="Ex: Sistema fora do ar")
+            descricao_chamado = st.text_area("Descrição detalhada", placeholder="Descreva o erro...")
+            
+            if st.button("Salvar Chamado", type="primary"):
+                if titulo_chamado.strip() == "" or descricao_chamado.strip() == "":
+                    st.warning("⚠️ Por favor, preencha todos os campos!")
+                else:
+                    conexao = sqlite3.connect("chamados.db")
+                    cursor = conexao.cursor()
+                    cursor.execute(
+                        "INSERT INTO chamados (titulo, descricao) VALUES (?, ?)", 
+                        (titulo_chamado, descricao_chamado)
+                    )
+                    conexao.commit()
+                    conexao.close()
+                    st.success("✅ Chamado registrado com sucesso!")
 
-    if aba_listagem:
-     with aba_listagem:
-        st.subheader("Chamados Registrados")
-
-        conexao = sqlite3.connect("chamados.db")
-        
-        dados = pd.read_sql_query("SELECT id AS 'Código', titulo AS 'Título', descricao AS 'Descrição' FROM chamados", conexao)
-        
-        conexao.close()
-        
-        if not dados.empty:
-            st.dataframe(dados, use_container_width=True, hide_index=True)
-        else:
-            st.info("ℹ️ Nenhum chamado cadastrado até o momento.")
     
+    if aba_listagem:
+        with aba_listagem:
+            st.subheader("Chamados Registrados")
+            
+            conexao = sqlite3.connect("chamados.db")
+            dados = pd.read_sql_query("SELECT id AS 'Código', titulo AS 'Título', descricao AS 'Descrição', status AS 'Status' FROM chamados", conexao)
+            conexao.close()
+            
+            if not dados.empty:
+                st.dataframe(dados, use_container_width=True, hide_index=True)
+                
+                st.markdown("---")
+                st.subheader("🛠️ Painel de Controle do Técnico")
+                
+                lista_ids = dados['Código'].tolist()
+                id_selecionado = st.selectbox("Selecione o Código do chamado:", lista_ids)
+                
+                col_resolver, col_apagar = st.columns(2)
+                
+                with col_resolver:
+                    conexao_status = sqlite3.connect("chamados.db")
+                    cursor_status = conexao_status.cursor()
+                    cursor_status.execute("SELECT status FROM chamados WHERE id = ?", (id_selecionado,))
+                    status_atual_tupla = cursor_status.fetchone()
+                    conexao_status.close()
+                    
+                    status_atual = status_atual_tupla[0] if status_atual_tupla else "Aberto"
+                    
+                    texto_botao = "🔄 Reabrir Chamado" if status_atual == "Resolvido" else "✅ Marcar como Resolvido"
+                    
+                    if st.button(texto_botao, use_container_width=True):
+                        novo_status = "Aberto" if status_atual == "Resolvido" else "Resolvido"
+                        
+                        conexao_btn = sqlite3.connect("chamados.db")
+                        cursor_btn = conexao_btn.cursor()
+                        cursor_btn.execute("UPDATE chamados SET status = ? WHERE id = ?", (novo_status, id_selecionado))
+                        conexao_btn.commit()
+                        conexao_btn.close()
+                        
+                        st.success(f"Status do chamado № {id_selecionado} alterado para {novo_status}!")
+                        st.rerun()
+                
+                with col_apagar:
+                    if st.button("🗑️ Apagar Chamado", type="secondary", use_container_width=True):
+                        conexao_btn = sqlite3.connect("chamados.db")
+                        cursor_btn = conexao_btn.cursor()
+                        cursor_btn.execute("DELETE FROM chamados WHERE id = ?", (id_selecionado,))
+                        conexao_btn.commit()
+                        conexao_btn.close()
+                        
+                        st.error(f"Chamado № {id_selecionado} foi apagado do sistema!")
+                        st.rerun()
+            else:
+                st.info("ℹ️ Nenhum chamado cadastrado até o momento.")
